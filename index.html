@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>万级单词管理系统 - 动态连线修复版 (含原声视频+熟练度分级)</title>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <script async src="https://youglish.com/public/emb/widget.js"></script>
+    <style>
+        :root {
+            --bg: #f4f7f9;
+            --primary: #007AFF;
+            --highlight: #67c23a;
+            --border: #e4e7ed;
+            --text-main: #1a1a1a;
+            --zoom-level: 0.85; 
+        }
+
+        body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: var(--bg); display: flex; flex-direction: column; height: 100vh; overflow: hidden; color: var(--text-main); }
+        
+        /* 顶部导航与标签栏 */
+        #header-container { background: #fff; border-bottom: 1px solid #ddd; z-index: 100; flex-shrink: 0; }
+        #toolbar { height: 50px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f0f0f0; }
+        #tag-bar { height: 45px; padding: 0 20px; display: flex; align-items: center; gap: 8px; overflow-x: auto; background: #fafafa; border-bottom: 1px solid #eee; }
+
+        .tag-btn { padding: 4px 12px; border-radius: 15px; background: #fff; font-size: 12px; cursor: pointer; border: 1px solid #ddd; white-space: nowrap; color: #444; transition: 0.2s; }
+        .tag-btn:hover { border-color: var(--primary); color: var(--primary); }
+        .tag-btn.active-filter { background: var(--primary); color: white; border-color: var(--primary); }
+        .tag-btn.semantic { background: #fff1f0; color: #f5222d; border-color: #ffa39e; font-weight: bold; }
+
+        /* 主体布局 */
+        #main-container { flex: 1; display: flex; overflow: hidden; position: relative; }
+        
+        /* 单词看板与画板容器 */
+        #board-wrapper { flex: 1; position: relative; overflow: hidden; display: flex; }
+        #connector-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+        #board-area { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: calc(12px * var(--zoom-level)); z-index: 1; position: relative; }
+
+        /* 调节柄与右侧面板 */
+        #resizer { width: 5px; cursor: col-resize; background: #eee; z-index: 10; transition: 0.2s; }
+        #resizer:hover { background: var(--primary); }
+        #detail-panel { width: 350px; min-width: 250px; background: #fff; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; z-index: 10; box-shadow: -2px 0 10px rgba(0,0,0,0.05); }
+
+        #detail-content { width: 100%; text-align: left; color: var(--text-main); }
+
+        /* 熟练度与视频区域 */
+        #prof-setter { margin-top: 20px; border-top: 2px solid #eee; padding-top: 15px; width: 100%; display: none; }
+        .prof-btn { padding: 4px 8px; border-radius: 4px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-size: 12px; transition: 0.2s; }
+        .prof-btn.active-prof { border-color: var(--primary); background: #eef6ff; color: var(--primary); font-weight: bold; }
+        
+        #video-section { margin-top: 20px; border-top: 2px solid #eee; padding-top: 15px; width: 100%; display: none; }
+        #yg-widget-0 { width: 100% !important; border-radius: 8px; overflow: hidden; }
+
+        /* 看板单词样式 */
+        .category-group { background: #fff; border: 1px solid var(--border); border-radius: 6px; min-width: calc(200px * var(--zoom-level)); display: flex; flex-direction: column; z-index: 2; position: relative; }
+        .category-title { padding: 6px 10px; font-size: 14px; background: #fbfbfc; font-weight: bold; cursor: move; border-bottom: 1px solid #eee; color: #333; }
+        .word-pool { padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; min-height: 40px; }
+        
+        .word-item { padding: calc(3px * var(--zoom-level)) calc(8px * var(--zoom-level)); font-size: calc(12px * var(--zoom-level)); background: #f8f9fa; border: 1px solid #e4e7ed; border-radius: 4px; cursor: pointer; color: #444; position: relative; border-left: 3px solid transparent; transition: opacity 0.2s; }
+        .word-item.hidden { display: none !important; } /* 熟练度过滤隐藏 */
+        
+        /* 熟练度左侧颜色标识 */
+        .word-item[data-prof="陌生"] { border-left-color: #f56c6c; }
+        .word-item[data-prof="熟悉"] { border-left-color: #e6a23c; }
+        .word-item[data-prof="掌握"] { border-left-color: #67c23a; }
+
+        .word-item.active { background: var(--primary) !important; color: white !important; z-index: 3; border-left-color: rgba(255,255,255,0.5) !important; }
+        .word-item.related { background: var(--highlight) !important; color: white !important; border-color: #529b2e; z-index: 3; border-left-color: rgba(255,255,255,0.5) !important; }
+
+        /* 经典释义样式 */
+        .dict-word { font-size: 2.2em; font-weight: bold; color: #000; margin: 0 0 5px 0; }
+        .dict-phonetic { color: #666; font-size: 1.1em; margin-bottom: 15px; }
+        .dict-section { width: 100%; margin-top: 15px; border-top: 1px solid #eee; padding-top: 12px; }
+        .dict-pos { display: inline-block; padding: 2px 6px; background: #eef6ff; color: var(--primary); border-radius: 4px; font-size: 0.85em; font-style: italic; margin-bottom: 5px; }
+        .dict-def { line-height: 1.5; color: #222; font-size: 1em; }
+        .dict-example { font-size: 0.9em; color: #555; padding-left: 10px; border-left: 3px solid #f0f0f0; margin: 8px 0; font-style: italic; }
+        .user-note-content { width: 100%; box-sizing: border-box; background: #fffdf5; padding: 15px; border-radius: 8px; border: 1px solid #f2e8c9; white-space: pre-wrap; font-size: 14px; color: #5d4037; margin-top: 25px; }
+
+        /* 按钮与通用 */
+        .btn { padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; border: none; color: white; font-weight: bold; }
+        .btn-import { background: var(--primary); }
+        .btn-export { background: #28a745; }
+        input[type="file"] { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="header-container">
+    <div id="toolbar">
+        <div style="display:flex; gap:10px; align-items:center;">
+            <label class="btn btn-import" for="file-input">📂 导入 Excel</label>
+            <input type="file" id="file-input" accept=".xlsx, .xls" />
+            <button class="btn btn-export" id="btn-save">💾 保存并导出</button>
+            
+            <div style="display:flex; align-items:center; margin-left:15px; padding-left:15px; border-left:1px solid #eee;">
+                <span style="font-size:11px; color:#999; margin-right:5px;">🚦 筛选</span>
+                <select id="prof-filter" style="padding:4px; border-radius:4px; border:1px solid #ddd; font-size:12px; outline:none; cursor:pointer;">
+                    <option value="全部">显示全部</option>
+                    <option value="陌生">🔴 只看陌生</option>
+                    <option value="熟悉">🟡 只看熟悉</option>
+                    <option value="掌握">🟢 只看掌握</option>
+                    <option value="未分级">⚪ 只看未分级</option>
+                </select>
+            </div>
+        </div>
+        <div class="zoom-controls">
+            <span style="font-size:11px; color:#999;">🔍 缩放</span>
+            <input type="range" id="zoom-slider" min="0.3" max="1.3" step="0.1" value="0.85">
+        </div>
+    </div>
+    <div id="tag-bar"><span style="color:#ccc; font-size:12px;">点击单词后生成标签并绘制关联线...</span></div>
+</div>
+
+<div id="main-container">
+    <div id="board-wrapper">
+        <svg id="connector-canvas"></svg>
+        <div id="board-area"><div style="text-align:center; width:100%; color:#ccc; margin-top:100px;">等待数据导入</div></div>
+    </div>
+    <div id="resizer"></div>
+    <div id="detail-panel">
+        <div id="detail-content">
+            <div style="color:#aaa; text-align:left; margin-top:50px;">点击单词查看详情</div>
+        </div>
+        
+        <div id="prof-setter">
+            <div style="font-size:12px; color:#888; margin-bottom:10px;">🚦 标记当前单词熟练度：</div>
+            <div style="display:flex; gap:8px;">
+                <button class="prof-btn" data-set-prof="陌生">🔴 陌生</button>
+                <button class="prof-btn" data-set-prof="熟悉">🟡 熟悉</button>
+                <button class="prof-btn" data-set-prof="掌握">🟢 掌握</button>
+                <button class="prof-btn" data-set-prof="未分级">⚪ 清除</button>
+            </div>
+        </div>
+
+        <div id="video-section">
+            <div style="font-size:12px; color:#888; margin-bottom:10px;">🎬 电影/美剧原声片段：</div>
+            <div id="yg-widget-container">
+                <a id="yg-widget-0" class="yg_widget" 
+                   href="https://youglish.com" 
+                   data-query="" 
+                   data-lang="english" 
+                   data-components="7423" 
+                   data-auto-start="0" 
+                   data-caption-font-size="12">
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const boardArea = document.getElementById('board-area');
+    const boardWrapper = document.getElementById('board-wrapper');
+    const tagBar = document.getElementById('tag-bar');
+    const svg = document.getElementById('connector-canvas');
+    const detailPanel = document.getElementById('detail-panel');
+    const resizer = document.getElementById('resizer');
+    const zoomSlider = document.getElementById('zoom-slider');
+    
+    let wordsMetadata = {}; 
+    let currentActiveWord = null;
+    let ygWidget = null; 
+
+    // --- YouGlish 控制函数 ---
+    function searchVideo(word) {
+        document.getElementById('video-section').style.display = 'block';
+        if (typeof YG !== "undefined") {
+            if (!ygWidget) {
+                ygWidget = new YG.Widget("yg-widget-0");
+            }
+            ygWidget.fetch(word, "english");
+        }
+    }
+
+    // --- 熟练度筛选与设置逻辑 ---
+    document.getElementById('prof-filter').addEventListener('change', (e) => {
+        const val = e.target.value;
+        Object.values(wordsMetadata).forEach(m => {
+            if (val === '全部' || m.proficiency === val) {
+                m.dom?.classList.remove('hidden');
+            } else {
+                m.dom?.classList.add('hidden');
+            }
+        });
+        drawLines(); // 筛选后重新计算连线
+    });
+
+    document.querySelectorAll('.prof-btn').forEach(btn => {
+        btn.onclick = () => {
+            if(!currentActiveWord) return;
+            const val = btn.getAttribute('data-set-prof');
+            const meta = wordsMetadata[currentActiveWord];
+            meta.proficiency = val;
+            meta.dom.setAttribute('data-prof', val); // 更新 UI 颜色
+            
+            // 更新按钮高亮
+            document.querySelectorAll('.prof-btn').forEach(b => b.classList.remove('active-prof'));
+            btn.classList.add('active-prof');
+            
+            // 如果当前正在启用过滤，动态隐藏被修改过的单词
+            document.getElementById('prof-filter').dispatchEvent(new Event('change'));
+        };
+    });
+
+    // --- 1. 动态连线核心逻辑 ---
+    function drawLines() {
+        svg.innerHTML = '';
+        if (!currentActiveWord) return;
+        
+        const sourceMeta = wordsMetadata[currentActiveWord];
+        // 如果起点元素被筛选隐藏了，就不画线
+        if (!sourceMeta || !sourceMeta.dom || sourceMeta.dom.classList.contains('hidden')) return;
+
+        const wrapperRect = boardWrapper.getBoundingClientRect();
+        const sourceRect = sourceMeta.dom.getBoundingClientRect();
+
+        const x1 = sourceRect.left - wrapperRect.left + sourceRect.width / 2;
+        const y1 = sourceRect.top - wrapperRect.top + sourceRect.height / 2;
+
+        // 仅向没有被隐藏的 related 元素画线
+        document.querySelectorAll('.word-item.related:not(.hidden)').forEach(targetDom => {
+            const targetRect = targetDom.getBoundingClientRect();
+            const x2 = targetRect.left - wrapperRect.left + targetRect.width / 2;
+            const y2 = targetRect.top - wrapperRect.top + targetRect.height / 2;
+
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", x1);
+            line.setAttribute("y1", y1);
+            line.setAttribute("x2", x2);
+            line.setAttribute("y2", y2);
+            line.setAttribute("stroke", "rgba(103, 194, 58, 0.6)"); 
+            line.setAttribute("stroke-width", "2");
+            line.setAttribute("stroke-dasharray", "4,3"); 
+            svg.appendChild(line);
+        });
+    }
+
+    boardArea.addEventListener('scroll', drawLines);
+    window.addEventListener('resize', drawLines);
+
+    zoomSlider.oninput = (e) => {
+        document.documentElement.style.setProperty('--zoom-level', e.target.value);
+        setTimeout(drawLines, 50); 
+    };
+
+    // --- 2. 侧边栏拖拽 ---
+    let isResizing = false;
+    resizer.onmousedown = () => isResizing = true;
+    document.onmousemove = (e) => {
+        if (!isResizing) return;
+        let w = window.innerWidth - e.clientX;
+        if (w > 200 && w < 800) detailPanel.style.width = w + 'px';
+        drawLines();
+    };
+    document.onmouseup = () => isResizing = false;
+
+    // --- 3. 数据导入与渲染 ---
+    document.getElementById('file-input').onchange = (e) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const wb = XLSX.read(new Uint8Array(ev.target.result), {type:'array'});
+            const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1});
+            render(rows);
+            // 导入后重置过滤器
+            document.getElementById('prof-filter').value = '全部';
+        };
+        reader.readAsArrayBuffer(e.target.files[0]);
+    };
+
+    function render(rows) {
+        boardArea.innerHTML = '';
+        wordsMetadata = {};
+        const groups = {};
+        
+        rows.forEach(row => {
+            const word = String(row[0]||"").trim(); if(!word) return;
+            const type = row[1] || '未分类';
+            const tagArray = String(row[3]||"").split(/[,，]/).map(t => t.trim()).filter(t => t);
+            const proficiency = row[4] || '未分级'; // 读取第 5 列作为熟练度
+
+            wordsMetadata[word] = { note: row[2]||"", rawTags: row[3]||"", tagArray, proficiency, dom: null };
+            if(!groups[type]) groups[type] = [];
+            groups[type].push(word);
+        });
+
+        Object.keys(groups).forEach(typeName => {
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'category-group';
+            groupDiv.innerHTML = `<div class="category-title">${typeName}</div><div class="word-pool"></div>`;
+            const pool = groupDiv.querySelector('.word-pool');
+            groups[typeName].forEach(word => {
+                const div = document.createElement('div');
+                div.className = 'word-item';
+                div.textContent = word;
+                div.setAttribute('data-prof', wordsMetadata[word].proficiency); // 写入 DOM 属性以触发 CSS
+                wordsMetadata[word].dom = div;
+                div.onclick = () => handleWordClick(word);
+                pool.appendChild(div);
+            });
+            boardArea.appendChild(groupDiv);
+            
+            new Sortable(pool, { 
+                group: 'shared', 
+                animation: 150,
+                onEnd: () => setTimeout(drawLines, 50) 
+            });
+        });
+        new Sortable(boardArea, { animation: 150, handle: '.category-title', onEnd: drawLines });
+        svg.innerHTML = ''; 
+    }
+
+    // --- 4. 点击交互与连线触发 ---
+    async function handleWordClick(word) {
+        currentActiveWord = word;
+        const meta = wordsMetadata[word];
+        
+        Object.values(wordsMetadata).forEach(m => m.dom?.classList.remove('active', 'related'));
+        meta.dom.classList.add('active');
+        svg.innerHTML = ''; 
+
+        // 生成顶部标签
+        tagBar.innerHTML = '';
+        meta.tagArray.forEach(tag => {
+            const btn = document.createElement('div');
+            btn.className = 'tag-btn';
+            btn.textContent = tag;
+            btn.onclick = () => {
+                document.querySelectorAll('.tag-btn').forEach(b => b.classList.remove('active-filter'));
+                btn.classList.add('active-filter');
+                Object.values(wordsMetadata).forEach(m => {
+                    m.dom?.classList.remove('related');
+                    if(m.tagArray.includes(tag)) m.dom?.classList.add('related');
+                });
+                drawLines(); 
+            };
+            tagBar.appendChild(btn);
+        });
+
+        // 语义匹配按钮
+        const semFunc = async (btn, type, label) => {
+            btn.textContent = '查询中...';
+            const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+            const data = await res.json();
+            let list = [];
+            if(res.ok) {
+                data[0].meanings.forEach(m => {
+                    if(m[type]) list = list.concat(m[type]);
+                    m.definitions.forEach(d => { if(d[type]) list = list.concat(d[type]); });
+                });
+            }
+            let count = 0;
+            Object.keys(wordsMetadata).forEach(w => {
+                wordsMetadata[w].dom?.classList.remove('related');
+                if(list.includes(w.toLowerCase())) { wordsMetadata[w].dom?.classList.add('related'); count++; }
+            });
+            btn.textContent = `${label}(${count})`;
+            drawLines(); 
+        };
+
+        const synBtn = document.createElement('div');
+        synBtn.className = 'tag-btn semantic';
+        synBtn.textContent = '🔍 近义词';
+        synBtn.onclick = () => semFunc(synBtn, 'synonyms', '近义词');
+        tagBar.appendChild(synBtn);
+
+        const antBtn = document.createElement('div');
+        antBtn.className = 'tag-btn semantic';
+        antBtn.textContent = '🔍 反义词';
+        antBtn.onclick = () => semFunc(antBtn, 'antonyms', '反义词');
+        tagBar.appendChild(antBtn);
+
+        // 获取并渲染释义
+        document.getElementById('detail-content').innerHTML = `<div style="color:var(--primary)">检索中...</div>`;
+        
+        // 显示熟练度打标面板并同步高亮状态
+        document.getElementById('prof-setter').style.display = 'block';
+        document.querySelectorAll('.prof-btn').forEach(b => {
+            b.classList.remove('active-prof');
+            if(b.getAttribute('data-set-prof') === meta.proficiency) {
+                b.classList.add('active-prof');
+            }
+        });
+
+        // 触发视频搜索
+        searchVideo(word);
+
+        try {
+            const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+            const data = await res.json();
+            let html = '';
+            if(res.ok) {
+                const e = data[0];
+                html = `<div class="dict-word">${e.word}</div><div class="dict-phonetic">${e.phonetic||''}</div>`;
+                e.meanings.slice(0,3).forEach(m => {
+                    html += `<div class="dict-section"><span class="dict-pos">${m.partOfSpeech}</span><div class="dict-def">${m.definitions[0].definition}</div>${m.definitions[0].example?`<div class="dict-example">"${m.definitions[0].example}"</div>`:''}</div>`;
+                });
+            } else {
+                html = `<div class="dict-word">${word}</div><p style="color:#999;">未收录该词</p>`;
+            }
+            if(meta.note) html += `<div class="user-note-content"><b>备注：</b><br>${meta.note}</div>`;
+            document.getElementById('detail-content').innerHTML = html;
+        } catch(e) { 
+            document.getElementById('detail-content').innerHTML = `<div class="dict-word">${word}</div><p>网络或接口错误</p>`;
+        }
+    }
+
+    // --- 5. 导出逻辑 ---
+    document.getElementById('btn-save').onclick = () => {
+        const data = [];
+        document.querySelectorAll('.category-group').forEach(cat => {
+            const type = cat.querySelector('.category-title').textContent;
+            cat.querySelectorAll('.word-item').forEach(w => {
+                const m = wordsMetadata[w.textContent];
+                // 导出时加入第 5 列：熟练度
+                data.push([w.textContent, type, m.note, m.rawTags, m.proficiency]);
+            });
+        });
+        if(data.length === 0) return alert("请先导入或添加数据！");
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Words");
+        XLSX.writeFile(wb, `Word_Manager_Export.xlsx`);
+    };
+</script>
+
+</body>
+</html>
